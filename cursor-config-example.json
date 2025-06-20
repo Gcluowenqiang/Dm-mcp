@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "dm-mcp": {
+      "command": "python",
+      "args": ["D:/cursorMcp/dm-mcp/main.py"],
+      "env": {
+        "DAMENG_HOST": "localhost",
+        "DAMENG_PORT": "5236",
+        "DAMENG_USERNAME": "SYSDBA",
+        "DAMENG_PASSWORD": "SYSDBA",
+        "DAMENG_DATABASE": "DAMENG",
+        "DAMENG_SECURITY_MODE": "readonly",
+        "DAMENG_ALLOWED_SCHEMAS": "*",
+        "DAMENG_CONNECT_TIMEOUT": "30",
+        "DAMENG_QUERY_TIMEOUT": "60",
+        "DAMENG_MAX_RETRIES": "3",
+        "DAMENG_ENABLE_QUERY_LOG": "false",
+        "DAMENG_MAX_RESULT_ROWS": "1000"
+      }
+    }
+  }
+} 
