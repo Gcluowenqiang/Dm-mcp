@@ -30,14 +30,84 @@
 
 ## 安装和配置
 
-### 1. 安装依赖
+### 🚀 Smithery.ai 平台快速部署
+
+**推荐方式：** 本MCP服务已针对 [Smithery.ai](https://smithery.ai/) 平台进行优化，支持一键部署。
+
+#### 特殊优化
+- ✅ **加密模块兼容**：已解决达梦数据库 `[CODE:-70089]Encryption module failed to load` 问题
+- ✅ **Docker优化**：预配置OpenSSL、libcrypto等必需依赖
+- ✅ **环境变量**：自动设置 `LD_LIBRARY_PATH` 和加密模块路径
+- ✅ **健康检查**：内置配置验证和故障诊断
+
+#### 部署配置
+
+在Smithery.ai平台配置以下环境变量：
+
+```bash
+# 必需配置
+DAMENG_HOST=your_dm_server         # 达梦数据库服务器地址
+DAMENG_PORT=5236                   # 达梦数据库端口
+DAMENG_USERNAME=your_username      # 数据库用户名  
+DAMENG_PASSWORD=your_password      # 数据库密码
+
+# 安全配置（推荐）
+DAMENG_SECURITY_MODE=readonly      # 生产环境推荐只读模式
+DAMENG_ALLOWED_SCHEMAS=*           # 允许访问的模式
+DAMENG_MAX_RESULT_ROWS=1000        # 限制返回行数
+```
+
+**部署验证**：容器启动后，健康检查会显示加密模块配置状态。查看日志确认：
+```
+✅ Health check passed
+✅ LD_LIBRARY_PATH: /opt/dmdbms/bin:/usr/lib/x86_64-linux-gnu
+✅ 达梦数据库环境配置完成
+```
+
+### 1. 本地安装依赖
 
 ```bash
 cd dm-mcp
 pip install -r requirements.txt
 ```
 
-### 2. 在 Cursor 中配置
+### 2. Windows 系统 dmPython 依赖配置 ⚠️ 重要
+
+**问题现象**：在 Windows 系统上可能遇到以下错误：
+```
+ImportError: DLL load failed while importing dmPython: 找不到指定的模块
+```
+
+**解决方案**：即使连接远程达梦数据库，Windows 客户端仍需要达梦数据库的 DLL 文件支持。
+
+#### 方法一：自动复制（推荐）
+```powershell
+# 将达梦驱动 DLL 复制到 Python 包目录
+Copy-Item "C:\Program Files\dmdbms\drivers\dpi\*.dll" `
+          "C:\users\你的用户名\appdata\roaming\python\python版本\site-packages\" -Force
+```
+
+#### 方法二：手动复制
+1. **定位源文件路径**：
+   ```
+   C:\Program Files\dmdbms\drivers\dpi\
+   ```
+
+2. **定位目标路径**：
+   - 查找你的 Python 包安装目录
+   - 通常位于：`C:\users\[用户名]\appdata\roaming\python\python[版本]\site-packages\`
+
+3. **复制所有 DLL 文件**：
+   - 将源路径下的所有 `.dll` 文件复制到目标路径
+
+#### 验证修复
+```python
+import dmPython
+print("dmPython 导入成功!")
+print(f"API Level: {dmPython.apilevel}")
+```
+
+### 3. 在 Cursor 中配置
 
 在 Cursor 的设置中找到 MCP 配置，添加以下内容：
 
@@ -62,7 +132,7 @@ pip install -r requirements.txt
 }
 ```
 
-### 3. 环境变量说明
+### 4. 环境变量说明
 
 **必需环境变量：**
 - `DAMENG_HOST`: 数据库主机地址
@@ -199,6 +269,33 @@ pip install -r requirements.txt
 
 ## 错误处理
 
+- **达梦数据库加密模块错误** (Docker/Linux)：
+  ```
+  [CODE:-70089]Encryption module failed to load
+  ```
+  **解决方案**：本项目已针对此问题进行优化：
+  - ✅ **Smithery.ai平台**：已预配置，无需额外操作
+  - ✅ **自建Docker**：使用提供的Dockerfile，已包含必需依赖
+  - ✅ **故障诊断**：检查容器日志中的LD_LIBRARY_PATH配置
+  
+  **手动验证**（如需要）：
+  ```bash
+  # 在容器内检查环境变量
+  echo $LD_LIBRARY_PATH
+  
+  # 检查OpenSSL库
+  ldconfig -p | grep ssl
+  
+  # 验证加密库文件
+  ls -la /usr/lib/x86_64-linux-gnu/libcrypto*
+  ```
+
+- **dmPython DLL 错误** (Windows)：
+  ```
+  ImportError: DLL load failed while importing dmPython: 找不到指定的模块
+  ```
+  **解决方案**：参见上方"Windows 系统 dmPython 依赖配置"章节，复制达梦 DLL 文件到 Python 包目录
+  
 - **配置错误**: 检查 Cursor MCP 配置中的环境变量设置
 - **连接失败**: 验证数据库连接参数和网络连通性
 - **权限不足**: 检查数据库用户权限和安全模式设置
@@ -239,10 +336,12 @@ pip install -r requirements.txt
 ```
 
 调试配置问题：
-1. 检查 Cursor 的 MCP 配置语法
-2. 验证所有必需的环境变量都已设置
-3. 确认数据库连接参数正确
-4. 查看 Cursor 的开发者工具中的 MCP 日志
+1. **检查 dmPython 导入**：先在 Python 中测试 `import dmPython` 是否成功
+2. **验证 DLL 依赖** (Windows)：确认达梦 DLL 文件已正确复制到 Python 包目录
+3. 检查 Cursor 的 MCP 配置语法
+4. 验证所有必需的环境变量都已设置
+5. 确认数据库连接参数正确
+6. 查看 Cursor 的开发者工具中的 MCP 日志
 
 ## 技术架构
 
@@ -261,6 +360,7 @@ pip install -r requirements.txt
 
 ### 达梦数据库适配
 - 使用 dmPython 驱动连接
+- Windows 平台 DLL 依赖处理（自动复制达梦驱动文件）
 - 适配达梦系统表查询语法
 - 支持达梦约束类型识别
 - 适配达梦数据类型映射
