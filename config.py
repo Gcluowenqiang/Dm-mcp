@@ -64,8 +64,7 @@ class DamengConfig(BaseModel):
         return (
             f"dm://{self.username}:{self.password}@"
             f"{self.host}:{self.port}/{self.database}"
-            f"?connectTimeout={self.connect_timeout}"
-            f"&appName=dm-mcp-{self.security_mode.value}"
+            f"?appName=dm-mcp-{self.security_mode.value}"
         )
     
     def is_readonly_mode(self) -> bool:
