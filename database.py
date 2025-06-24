@@ -146,9 +146,12 @@ class DamengDatabase:
                 password=self.config.password,
                 server=self.config.host,
                 port=self.config.port,
-                database=self.config.database,
                 autoCommit=False
             )
+            
+            # 达梦数据库连接成功后记录配置的数据库实例信息
+            if self.config.database:
+                logger.info(f"连接配置的数据库实例: {self.config.database}")
             
             # 根据安全模式设置事务属性
             if self.config.is_readonly_mode():
