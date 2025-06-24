@@ -40,15 +40,10 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import sys; import os; from config import DamengConfig; print('Health check passed')" || exit 1
 
-# 设置默认环境变量（可被外部覆盖）
-ENV DAMENG_HOST=localhost
-ENV DAMENG_PORT=5236
-ENV DAMENG_USERNAME=SYSDBA
-ENV DAMENG_PASSWORD=SYSDBA
-ENV DAMENG_DATABASE=DAMENG
-ENV DAMENG_SECURITY_MODE=readonly
-ENV DAMENG_ALLOWED_SCHEMAS=*
-ENV DAMENG_MAX_RESULT_ROWS=1000
+# 注意：所有数据库连接配置必须通过运行时环境变量提供
+# 平台将动态注入以下必需的环境变量：
+# DAMENG_HOST, DAMENG_PORT, DAMENG_USERNAME, DAMENG_PASSWORD, DAMENG_DATABASE
+# 以及可选的安全和配置参数
 
 # 运行MCP服务器
 CMD ["python", "main.py"] 
