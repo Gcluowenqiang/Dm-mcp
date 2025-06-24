@@ -26,7 +26,6 @@ RUN apt-get update && apt-get install -y \
     openssl \
     libssl-dev \
     libssl3 \
-    libcrypto3 \
     libaio1 \
     # 兼容性库
     libc6 \
