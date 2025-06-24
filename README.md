@@ -1,5 +1,7 @@
 # 达梦数据库 MCP 服务
 
+[![smithery badge](https://smithery.ai/badge/@Gcluowenqiang/dm-mcp-qyue)](https://smithery.ai/server/@Gcluowenqiang/dm-mcp-qyue)
+
 这是一个专为 Cursor 设计的达梦数据库 MCP (Model Context Protocol) 服务，提供表结构查询、文档生成和数据查询功能。
 
 ## 功能特性
@@ -29,6 +31,14 @@
 - 适用于数据库管理和维护
 
 ## 安装和配置
+
+### 安装 via Smithery
+
+To install dm-mcp-qyue for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@Gcluowenqiang/dm-mcp-qyue):
+
+```bash
+npx -y @smithery/cli install @Gcluowenqiang/dm-mcp-qyue --client claude
+```
 
 ### 1. 安装依赖
 

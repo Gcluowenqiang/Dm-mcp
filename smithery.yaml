@@ -1,0 +1,89 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+startCommand:
+  type: stdio
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => ({
+      command: 'python',
+      args: ['main.py'],
+      env: {
+        DAMENG_HOST: config.host,
+        DAMENG_PORT: config.port.toString(),
+        DAMENG_USERNAME: config.username,
+        DAMENG_PASSWORD: config.password,
+        DAMENG_CONNECT_TIMEOUT: config.connectTimeout.toString(),
+        DAMENG_QUERY_TIMEOUT: config.queryTimeout.toString(),
+        DAMENG_MAX_RETRIES: config.maxRetries.toString(),
+        DAMENG_SECURITY_MODE: config.securityMode,
+        DAMENG_ALLOWED_SCHEMAS: config.allowedSchemas.join(','),
+        DAMENG_ENABLE_QUERY_LOG: config.enableQueryLog.toString(),
+        DAMENG_MAX_RESULT_ROWS: config.maxResultRows.toString()
+      }
+    })
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - host
+      - port
+      - username
+      - password
+    properties:
+      host:
+        type: string
+        description: 达梦数据库主机地址
+      port:
+        type: number
+        description: 达梦数据库端口
+      username:
+        type: string
+        description: 达梦数据库用户名
+      password:
+        type: string
+        description: 达梦数据库密码
+      connectTimeout:
+        type: number
+        default: 30
+        description: 连接超时时间（秒）
+      queryTimeout:
+        type: number
+        default: 60
+        description: 查询超时时间（秒）
+      maxRetries:
+        type: number
+        default: 3
+        description: 最大重试次数
+      securityMode:
+        type: string
+        default: readonly
+        description: 安全模式
+      allowedSchemas:
+        type: array
+        items:
+          type: string
+        default:
+          - "*"
+        description: 允许访问的模式列表，支持 '*' 或 'auto'
+      enableQueryLog:
+        type: boolean
+        default: false
+        description: 是否启用查询日志
+      maxResultRows:
+        type: number
+        default: 1000
+        description: 最大返回行数
+  exampleConfig:
+    host: dm.example.com
+    port: 5236
+    username: admin
+    password: secret
+    connectTimeout: 30
+    queryTimeout: 60
+    maxRetries: 3
+    securityMode: readonly
+    allowedSchemas:
+      - "*"
+    enableQueryLog: false
+    maxResultRows: 1000
