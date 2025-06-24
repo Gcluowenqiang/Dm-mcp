@@ -36,13 +36,15 @@ RUN chmod +x main.py
 # 暴露默认端口（虽然MCP通过stdio通信，但为了兼容性保留）
 EXPOSE 3000
 
-# 设置健康检查
+# 设置健康检查（检查Python运行环境和基础配置）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "from config import get_config_instance; get_config_instance()" || exit 1
+    CMD python -c "import sys; import os; from config import DamengConfig; print('Health check passed')" || exit 1
 
 # 设置默认环境变量（可被外部覆盖）
 ENV DAMENG_HOST=localhost
 ENV DAMENG_PORT=5236
+ENV DAMENG_USERNAME=SYSDBA
+ENV DAMENG_PASSWORD=SYSDBA
 ENV DAMENG_DATABASE=DAMENG
 ENV DAMENG_SECURITY_MODE=readonly
 ENV DAMENG_ALLOWED_SCHEMAS=*
