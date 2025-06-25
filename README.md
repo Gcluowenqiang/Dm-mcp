@@ -1,4 +1,5 @@
 # 达梦数据库 MCP 服务
+[![smithery badge](https://smithery.ai/badge/@Gcluowenqiang/dm-mcp)](https://smithery.ai/server/@Gcluowenqiang/dm-mcp)
 
 这是一个专为 Cursor 设计的达梦数据库 MCP (Model Context Protocol) 服务，提供表结构查询、文档生成和数据查询功能。
 
@@ -62,6 +63,14 @@ DAMENG_MAX_RESULT_ROWS=1000        # 限制返回行数
 ✅ Health check passed
 ✅ LD_LIBRARY_PATH: /opt/dmdbms/bin:/usr/lib/x86_64-linux-gnu
 ✅ 达梦数据库环境配置完成
+```
+
+### Installing via Smithery
+
+To install dm-mcp for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@Gcluowenqiang/dm-mcp):
+
+```bash
+npx -y @smithery/cli install @Gcluowenqiang/dm-mcp --client claude
 ```
 
 ### 1. 本地安装依赖
