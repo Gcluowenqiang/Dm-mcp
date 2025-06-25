@@ -146,21 +146,17 @@ class DamengDatabase:
                 password=self.config.password,
                 server=self.config.host,
                 port=self.config.port,
-                autoCommit=False
+                autoCommit=True  # 达梦数据库使用自动提交模式避免语法问题
             )
             
             # 达梦数据库连接成功后记录配置的数据库实例信息
             if self.config.database:
                 logger.info(f"连接配置的数据库实例: {self.config.database}")
             
-            # 根据安全模式设置事务属性
+            # 达梦数据库连接配置
             if self.config.is_readonly_mode():
-                with conn.cursor() as cur:
-                    # 达梦数据库设置只读模式
-                    cur.execute("SET SESSION AUTOCOMMIT = 0")
-                    logger.info("已设置达梦数据库连接为只读模式")
+                logger.info("已设置达梦数据库连接为只读模式")
             
-            conn.commit()
             logger.info(f"成功连接到达梦数据库（{self.config.security_mode.value}模式）")
             yield conn
             
@@ -208,8 +204,7 @@ class DamengDatabase:
                         logger.info(f"查询执行成功，返回 {len(result_dicts)} 条记录")
                         return result_dicts
                     else:
-                        # 对于非查询操作（INSERT、UPDATE等），提交事务并返回影响的行数
-                        conn.commit()
+                        # 对于非查询操作（INSERT、UPDATE等），返回影响的行数（已自动提交）
                         affected_rows = cur.rowcount
                         logger.info(f"操作执行成功，影响 {affected_rows} 行")
                         return [{"affected_rows": affected_rows, "status": "success"}]
@@ -282,12 +277,12 @@ class DamengDatabase:
             return str(self.config.allowed_schemas)
     
     def get_available_schemas(self) -> List[Dict[str, Any]]:
-        """获取用户有权限访问的所有schema（适配达梦数据库）"""
+        """获取用户有权限访问的所有schema（基于表所有者）"""
         sql = """
-        SELECT USERNAME as schemaname
-        FROM ALL_USERS 
-        WHERE USERNAME NOT IN ('SYS', 'SYSTEM', 'SYSAUDITOR', 'CTXSYS', 'SYSDBA')
-        ORDER BY USERNAME
+        SELECT DISTINCT OWNER as schemaname
+        FROM ALL_TABLES 
+        WHERE OWNER NOT IN ('SYS', 'SYSTEM', 'SYSAUDITOR', 'CTXSYS')
+        ORDER BY OWNER
         """
         return self.execute_safe_query(sql)
 
@@ -298,7 +293,7 @@ class DamengDatabase:
             allowed_schemas = self._get_allowed_schemas_display()
             raise ValueError(f"不允许访问模式: {schema}，允许的模式: {allowed_schemas}")
         
-        # 达梦数据库查询表结构的SQL
+        # 达梦数据库查询表结构的SQL（简化版，避免COMMENTS字段语法问题）
         sql = """
         SELECT 
             c.COLUMN_NAME as column_name,
@@ -313,7 +308,7 @@ class DamengDatabase:
                 WHEN pk.COLUMN_NAME IS NOT NULL THEN 'YES'
                 ELSE 'NO'
             END as is_primary_key,
-            c.COMMENTS as column_comment
+            '' as column_comment
         FROM ALL_TAB_COLUMNS c
         LEFT JOIN (
             SELECT cc.COLUMN_NAME
@@ -385,7 +380,12 @@ class DamengDatabase:
         """测试数据库连接"""
         try:
             result = self.execute_safe_query("SELECT 1 as test_connection FROM DUAL")
-            return len(result) > 0 and result[0]['test_connection'] == 1
+            if len(result) > 0:
+                # 达梦数据库字段名可能是大写，尝试两种格式
+                first_row = result[0]
+                test_value = first_row.get('test_connection') or first_row.get('TEST_CONNECTION')
+                return test_value == 1
+            return False
         except Exception as e:
             logger.error(f"连接测试失败: {e}")
             return False

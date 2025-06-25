@@ -203,7 +203,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
                     text=f"在模式 '{schema}' 中没有找到任何表"
                 )]
             
-            table_list = "\n".join([f"- {table['tablename']}" for table in tables])
+            # 达梦数据库字段名可能是大写，尝试两种格式
+            table_list = "\n".join([f"- {table.get('tablename') or table.get('TABLENAME', 'Unknown')}" for table in tables])
             return [TextContent(
                 type="text",
                 text=f"模式 '{schema}' 中的表列表:\n{table_list}\n\n总计: {len(tables)} 个表"
@@ -234,24 +235,37 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
             result = f"表 '{table_name}' 结构信息:\n\n"
             result += "字段列表:\n"
             for col in structure:
-                result += f"- {col['column_name']} ({col['data_type']}) "
-                if col['is_nullable'] == 'NO':
+                # 达梦数据库字段名可能是大写，尝试两种格式
+                column_name = col.get('column_name') or col.get('COLUMN_NAME', 'Unknown')
+                data_type = col.get('data_type') or col.get('DATA_TYPE', 'Unknown')
+                is_nullable = col.get('is_nullable') or col.get('IS_NULLABLE', 'YES')
+                is_primary_key = col.get('is_primary_key') or col.get('IS_PRIMARY_KEY', 'NO')
+                column_comment = col.get('column_comment') or col.get('COLUMN_COMMENT', '')
+                
+                result += f"- {column_name} ({data_type}) "
+                if is_nullable == 'NO':
                     result += "NOT NULL "
-                if col['is_primary_key'] == 'YES':
+                if is_primary_key == 'YES':
                     result += "[主键] "
-                if col['column_comment']:
-                    result += f"-- {col['column_comment']}"
+                if column_comment:
+                    result += f"-- {column_comment}"
                 result += "\n"
             
             if indexes:
                 result += f"\n索引 ({len(indexes)} 个):\n"
                 for idx in indexes:
-                    result += f"- {idx['indexname']} {'[唯一]' if idx['is_unique'] == 'YES' else ''}\n"
+                    # 达梦数据库字段名可能是大写，尝试两种格式
+                    indexname = idx.get('indexname') or idx.get('INDEXNAME', 'Unknown')
+                    is_unique = idx.get('is_unique') or idx.get('IS_UNIQUE', 'NO')
+                    result += f"- {indexname} {'[唯一]' if is_unique == 'YES' else ''}\n"
             
             if constraints:
                 result += f"\n约束 ({len(constraints)} 个):\n"
                 for constraint in constraints:
-                    result += f"- {constraint['constraint_name']} ({constraint['constraint_type']})\n"
+                    # 达梦数据库字段名可能是大写，尝试两种格式
+                    constraint_name = constraint.get('constraint_name') or constraint.get('CONSTRAINT_NAME', 'Unknown')
+                    constraint_type = constraint.get('constraint_type') or constraint.get('CONSTRAINT_TYPE', 'Unknown')
+                    result += f"- {constraint_name} ({constraint_type})\n"
             
             return [TextContent(type="text", text=result)]
         
@@ -278,6 +292,24 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
                         text=f"表 '{table_name}' 在模式 '{schema}' 中不存在"
                     )]
                 
+                # 预处理数据，确保字段名兼容性
+                def normalize_data(data_list):
+                    """标准化数据，将大写字段名转换为小写（保持原字段名作为备份）"""
+                    normalized = []
+                    for item in data_list:
+                        normalized_item = {}
+                        for key, value in item.items():
+                            # 保留原字段名
+                            normalized_item[key] = value
+                            # 添加小写字段名
+                            normalized_item[key.lower()] = value
+                        normalized.append(normalized_item)
+                    return normalized
+                
+                structure = normalize_data(structure)
+                indexes = normalize_data(indexes)
+                constraints = normalize_data(constraints)
+                
                 # 生成文档
                 if format_type == "markdown":
                     doc = doc_generator.generate_table_structure_doc(table_name, structure, indexes, constraints)
@@ -294,8 +326,9 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
                         text=f"不支持的文档格式: {format_type}"
                     )]
                 
-                # 确保docs目录存在（使用用户工作目录的相对路径）
-                docs_dir = os.path.join(os.getcwd(), "docs")
+                # 确保在MCP服务目录下创建docs目录
+                service_dir = os.path.dirname(os.path.abspath(__file__))  # 获取MCP服务所在目录
+                docs_dir = os.path.join(service_dir, "docs")
                 os.makedirs(docs_dir, exist_ok=True)
                 
                 # 生成文件名
@@ -309,9 +342,11 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
                         f.write(doc)
                     
                     # 返回成功信息和文档预览
+                    # 显示MCP服务目录的相对路径
+                    relative_path = os.path.relpath(file_path, service_dir)
                     result_text = f"✅ 文档生成成功!\n\n"
-                    result_text += f"📁 文件路径: {file_path}\n"
-                    result_text += f"📂 工作目录: {os.getcwd()}\n"
+                    result_text += f"📁 保存路径: {relative_path}\n"
+                    result_text += f"📂 MCP服务目录: {service_dir}\n"
                     result_text += f"📊 表名: {schema}.{table_name}\n"
                     result_text += f"📝 格式: {format_type}\n"
                     result_text += f"⏰ 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -343,11 +378,28 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
                 schema = arguments.get("schema", "SYSDBA") if arguments else "SYSDBA"
                 tables = db.get_all_tables(schema)
                 
+                # 预处理数据，确保字段名兼容性
+                def normalize_data(data_list):
+                    """标准化数据，将大写字段名转换为小写（保持原字段名作为备份）"""
+                    normalized = []
+                    for item in data_list:
+                        normalized_item = {}
+                        for key, value in item.items():
+                            # 保留原字段名
+                            normalized_item[key] = value
+                            # 添加小写字段名
+                            normalized_item[key.lower()] = value
+                        normalized.append(normalized_item)
+                    return normalized
+                
+                tables = normalize_data(tables)
+                
                 # 生成数据库概览文档
                 doc = doc_generator.generate_database_overview_doc(tables)
                 
-                # 确保docs目录存在（使用用户工作目录的相对路径）
-                docs_dir = os.path.join(os.getcwd(), "docs")
+                # 确保在MCP服务目录下创建docs目录
+                service_dir = os.path.dirname(os.path.abspath(__file__))  # 获取MCP服务所在目录
+                docs_dir = os.path.join(service_dir, "docs")
                 os.makedirs(docs_dir, exist_ok=True)
                 
                 # 生成文件名
@@ -361,9 +413,11 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
                         f.write(doc)
                     
                     # 返回成功信息和文档预览
+                    # 显示MCP服务目录的相对路径
+                    relative_path = os.path.relpath(file_path, service_dir)
                     result_text = f"✅ 数据库概览文档生成成功!\n\n"
-                    result_text += f"📁 文件路径: {file_path}\n"
-                    result_text += f"📂 工作目录: {os.getcwd()}\n"
+                    result_text += f"📁 保存路径: {relative_path}\n"
+                    result_text += f"📂 MCP服务目录: {service_dir}\n"
                     result_text += f"🗂️ 模式: {schema}\n"
                     result_text += f"📋 表数量: {len(tables)} 个\n"
                     result_text += f"⏰ 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -441,7 +495,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
                         text="没有找到可访问的数据库模式"
                     )]
                 
-                schema_list = "\n".join([f"- {schema['schemaname']}" for schema in schemas])
+                # 达梦数据库字段名可能是大写，尝试两种格式
+                schema_list = "\n".join([f"- {schema.get('schemaname') or schema.get('SCHEMANAME', 'Unknown')}" for schema in schemas])
                 
                 config_info = f"当前schema访问策略: {db._get_allowed_schemas_display()}\n\n"
                 result_text = config_info + f"可访问的数据库模式:\n{schema_list}\n\n总计: {len(schemas)} 个模式"

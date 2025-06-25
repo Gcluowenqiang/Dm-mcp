@@ -9,6 +9,7 @@ See LICENSE file in the project root for full license information.
 from typing import List, Dict, Any
 from datetime import datetime
 import json
+from decimal import Decimal
 from tabulate import tabulate
 from jinja2 import Template
 
@@ -18,6 +19,33 @@ class DocumentGenerator:
     
     def __init__(self):
         self.timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    def _get_field_value(self, data: Dict[str, Any], field_name: str, default: str = '') -> str:
+        """安全获取字段值，兼容大小写字段名"""
+        # 尝试小写字段名
+        value = data.get(field_name.lower(), None)
+        if value is not None:
+            return str(value) if value else default
+        
+        # 尝试大写字段名
+        value = data.get(field_name.upper(), None)
+        if value is not None:
+            return str(value) if value else default
+        
+        # 尝试原始字段名
+        value = data.get(field_name, None)
+        if value is not None:
+            return str(value) if value else default
+        
+        return default
+    
+    def _json_serializer(self, obj):
+        """JSON序列化处理器，处理Decimal等特殊类型"""
+        if isinstance(obj, Decimal):
+            return str(obj)
+        if hasattr(obj, 'isoformat'):  # datetime对象
+            return obj.isoformat()
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
     
     def generate_table_structure_doc(self, table_name: str, structure: List[Dict[str, Any]], 
                                    indexes: List[Dict[str, Any]], 
@@ -53,16 +81,16 @@ class DocumentGenerator:
             
             for col in structure:
                 row = [
-                    col.get('ordinal_position', ''),
-                    f"`{col.get('column_name', '')}`",
-                    col.get('data_type', ''),
-                    col.get('character_maximum_length', '') or '',
-                    col.get('numeric_precision', '') or '',
-                    col.get('numeric_scale', '') or '',
-                    '是' if col.get('is_nullable') == 'YES' else '否',
-                    col.get('column_default', '') or '',
-                    '是' if col.get('is_primary_key') == 'YES' else '否',
-                    col.get('column_comment', '') or ''
+                    self._get_field_value(col, 'ordinal_position'),
+                    f"`{self._get_field_value(col, 'column_name')}`",
+                    self._get_field_value(col, 'data_type'),
+                    self._get_field_value(col, 'character_maximum_length'),
+                    self._get_field_value(col, 'numeric_precision'),
+                    self._get_field_value(col, 'numeric_scale'),
+                    '是' if self._get_field_value(col, 'is_nullable') == 'YES' else '否',
+                    self._get_field_value(col, 'column_default'),
+                    '是' if self._get_field_value(col, 'is_primary_key') == 'YES' else '否',
+                    self._get_field_value(col, 'column_comment')
                 ]
                 rows.append(row)
             
@@ -73,9 +101,9 @@ class DocumentGenerator:
         doc += "## 索引信息\n\n"
         if indexes:
             for idx in indexes:
-                doc += f"### `{idx.get('indexname', '')}`\n\n"
-                doc += f"**类型**: {'唯一索引' if idx.get('is_unique') == 'YES' else '普通索引'}\n\n"
-                doc += f"**定义**: \n```sql\n{idx.get('indexdef', '')}\n```\n\n"
+                doc += f"### `{self._get_field_value(idx, 'indexname')}`\n\n"
+                doc += f"**类型**: {'唯一索引' if self._get_field_value(idx, 'is_unique') == 'YES' else '普通索引'}\n\n"
+                doc += f"**定义**: \n```sql\n{self._get_field_value(idx, 'indexdef')}\n```\n\n"
         else:
             doc += "暂无索引信息\n\n"
         
@@ -86,7 +114,7 @@ class DocumentGenerator:
         if constraints:
             constraint_types = {}
             for constraint in constraints:
-                c_type = constraint.get('constraint_type', '')
+                c_type = self._get_field_value(constraint, 'constraint_type')
                 if c_type not in constraint_types:
                     constraint_types[c_type] = []
                 constraint_types[c_type].append(constraint)
@@ -94,10 +122,10 @@ class DocumentGenerator:
             for c_type, c_list in constraint_types.items():
                 doc += f"### {self._get_constraint_type_name(c_type)}\n\n"
                 for constraint in c_list:
-                    doc += f"- **{constraint.get('constraint_name', '')}**: "
-                    doc += f"字段 `{constraint.get('column_name', '')}`"
-                    if constraint.get('foreign_key_references'):
-                        doc += f" → 引用 `{constraint.get('foreign_key_references')}`"
+                    doc += f"- **{self._get_field_value(constraint, 'constraint_name')}**: "
+                    doc += f"字段 `{self._get_field_value(constraint, 'column_name')}`"
+                    if self._get_field_value(constraint, 'foreign_key_references'):
+                        doc += f" → 引用 `{self._get_field_value(constraint, 'foreign_key_references')}`"
                     doc += "\n"
                 doc += "\n"
         else:
@@ -131,11 +159,11 @@ class DocumentGenerator:
             for i, table in enumerate(tables, 1):
                 row = [
                     i,
-                    f"`{table.get('tablename', '')}`",
-                    table.get('tableowner', ''),
-                    '是' if table.get('hasindexes') else '否',
-                    '是' if table.get('hasrules') else '否',
-                    '是' if table.get('hastriggers') else '否'
+                    f"`{self._get_field_value(table, 'tablename')}`",
+                    self._get_field_value(table, 'tableowner'),
+                    '是' if self._get_field_value(table, 'hasindexes') == 'YES' else '否',
+                    '是' if self._get_field_value(table, 'hasrules') == 'YES' else '否',
+                    '是' if self._get_field_value(table, 'hastriggers') == 'YES' else '否'
                 ]
                 rows.append(row)
             
@@ -145,9 +173,9 @@ class DocumentGenerator:
         # 统计信息
         doc += "## 统计信息\n\n"
         
-        has_indexes = sum(1 for t in tables if t.get('hasindexes'))
-        has_rules = sum(1 for t in tables if t.get('hasrules'))
-        has_triggers = sum(1 for t in tables if t.get('hastriggers'))
+        has_indexes = sum(1 for t in tables if self._get_field_value(t, 'hasindexes') == 'YES')
+        has_rules = sum(1 for t in tables if self._get_field_value(t, 'hasrules') == 'YES')
+        has_triggers = sum(1 for t in tables if self._get_field_value(t, 'hastriggers') == 'YES')
         
         doc += f"- **包含索引的表**: {has_indexes} 个\n"
         doc += f"- **包含规则的表**: {has_rules} 个\n"
@@ -179,7 +207,7 @@ class DocumentGenerator:
                 "constraint_count": len(constraints)
             }
         }
-        return json.dumps(data, ensure_ascii=False, indent=2)
+        return json.dumps(data, ensure_ascii=False, indent=2, default=self._json_serializer)
     
     def _get_constraint_type_name(self, constraint_type: str) -> str:
         """获取约束类型中文名称（适配达梦数据库）"""
@@ -202,28 +230,34 @@ class DocumentGenerator:
         
         columns = []
         for col in structure:
-            col_def = f"    {col.get('column_name', '')}"
+            col_def = f"    {self._get_field_value(col, 'column_name')}"
             
             # 数据类型
-            data_type = col.get('data_type', '')
-            if col.get('character_maximum_length'):
-                data_type += f"({col.get('character_maximum_length')})"
-            elif col.get('numeric_precision') and col.get('numeric_scale'):
-                data_type += f"({col.get('numeric_precision')},{col.get('numeric_scale')})"
+            data_type = self._get_field_value(col, 'data_type')
+            char_length = self._get_field_value(col, 'character_maximum_length')
+            num_precision = self._get_field_value(col, 'numeric_precision')
+            num_scale = self._get_field_value(col, 'numeric_scale')
+            
+            if char_length:
+                data_type += f"({char_length})"
+            elif num_precision and num_scale:
+                data_type += f"({num_precision},{num_scale})"
             
             col_def += f" {data_type}"
             
             # 非空约束
-            if col.get('is_nullable') == 'NO':
+            if self._get_field_value(col, 'is_nullable') == 'NO':
                 col_def += " NOT NULL"
             
             # 默认值
-            if col.get('column_default'):
-                col_def += f" DEFAULT {col.get('column_default')}"
+            default_val = self._get_field_value(col, 'column_default')
+            if default_val:
+                col_def += f" DEFAULT {default_val}"
             
             # 注释
-            if col.get('column_comment'):
-                col_def += f" -- {col.get('column_comment')}"
+            comment = self._get_field_value(col, 'column_comment')
+            if comment:
+                col_def += f" -- {comment}"
             
             columns.append(col_def)
         
