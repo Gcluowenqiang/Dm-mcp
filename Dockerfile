@@ -53,14 +53,14 @@ COPY . .
 RUN mkdir -p /app/docs
 
 # 设置正确的文件权限
-RUN chmod +x main.py
+RUN chmod +x main.py 2>/dev/null || true
 
 # 暴露默认端口（虽然MCP通过stdio通信，但为了兼容性保留）
 EXPOSE 3000
 
-# 设置健康检查（简化以确保构建稳定性）
+# 简化的健康检查（不连接数据库）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; print('Health check passed')" || exit 1
+    CMD python -c "import sys; sys.exit(0)" || exit 1
 
 # 验证环境配置
 RUN echo "达梦数据库环境配置:" && \
