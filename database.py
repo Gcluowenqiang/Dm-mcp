@@ -10,6 +10,7 @@ import dmPython
 from typing import List, Dict, Any, Optional, Set
 import logging
 from contextlib import contextmanager
+from decimal import Decimal
 from config import get_config_instance, SecurityMode
 
 # 配置日志
@@ -146,18 +147,17 @@ class DamengDatabase:
                 password=self.config.password,
                 server=self.config.host,
                 port=self.config.port,
-                database=self.config.database,
-                autoCommit=False
+                autoCommit=True  # 达梦数据库使用自动提交模式避免语法问题
             )
             
-            # 根据安全模式设置事务属性
-            if self.config.is_readonly_mode():
-                with conn.cursor() as cur:
-                    # 达梦数据库设置只读模式
-                    cur.execute("SET SESSION AUTOCOMMIT = 0")
-                    logger.info("已设置达梦数据库连接为只读模式")
+            # 达梦数据库连接成功后记录配置的数据库实例信息
+            if self.config.database:
+                logger.info(f"连接配置的数据库实例: {self.config.database}")
             
-            conn.commit()
+            # 达梦数据库连接配置
+            if self.config.is_readonly_mode():
+                logger.info("已设置达梦数据库连接为只读模式")
+            
             logger.info(f"成功连接到达梦数据库（{self.config.security_mode.value}模式）")
             yield conn
             
@@ -192,10 +192,37 @@ class DamengDatabase:
                         # 获取列名
                         columns = [desc[0] for desc in cur.description] if cur.description else []
                         
-                        # 将结果转换为字典列表
+                        # 将结果转换为字典列表，处理 Decimal 类型
                         result_dicts = []
                         for row in results:
-                            result_dicts.append(dict(zip(columns, row)))
+                            # 转换 Decimal 为 float 或 str 以支持 JSON 序列化
+                            converted_row = []
+                            for value in row:
+                                if isinstance(value, Decimal):
+                                    # 对于 Decimal，转换为 float（如果精度允许）或 str
+                                    try:
+                                        converted_row.append(float(value))
+                                    except (OverflowError, ValueError):
+                                        converted_row.append(str(value))
+                                else:
+                                    converted_row.append(value)
+                            result_dicts.append(dict(zip(columns, converted_row)))
+                        
+                        # 递归处理嵌套的 Decimal 类型
+                        def deep_convert_decimals(obj):
+                            if isinstance(obj, dict):
+                                return {k: deep_convert_decimals(v) for k, v in obj.items()}
+                            elif isinstance(obj, list):
+                                return [deep_convert_decimals(item) for item in obj]
+                            elif isinstance(obj, Decimal):
+                                try:
+                                    return float(obj)
+                                except (OverflowError, ValueError):
+                                    return str(obj)
+                            else:
+                                return obj
+                        
+                        result_dicts = deep_convert_decimals(result_dicts)
                         
                         # 限制返回结果数量
                         if len(result_dicts) > self.config.max_result_rows:
@@ -205,8 +232,7 @@ class DamengDatabase:
                         logger.info(f"查询执行成功，返回 {len(result_dicts)} 条记录")
                         return result_dicts
                     else:
-                        # 对于非查询操作（INSERT、UPDATE等），提交事务并返回影响的行数
-                        conn.commit()
+                        # 对于非查询操作（INSERT、UPDATE等），返回影响的行数（已自动提交）
                         affected_rows = cur.rowcount
                         logger.info(f"操作执行成功，影响 {affected_rows} 行")
                         return [{"affected_rows": affected_rows, "status": "success"}]
@@ -279,12 +305,12 @@ class DamengDatabase:
             return str(self.config.allowed_schemas)
     
     def get_available_schemas(self) -> List[Dict[str, Any]]:
-        """获取用户有权限访问的所有schema（适配达梦数据库）"""
+        """获取用户有权限访问的所有schema（基于表所有者）"""
         sql = """
-        SELECT USERNAME as schemaname
-        FROM ALL_USERS 
-        WHERE USERNAME NOT IN ('SYS', 'SYSTEM', 'SYSAUDITOR', 'CTXSYS', 'SYSDBA')
-        ORDER BY USERNAME
+        SELECT DISTINCT OWNER as schemaname
+        FROM ALL_TABLES 
+        WHERE OWNER NOT IN ('SYS', 'SYSTEM', 'SYSAUDITOR', 'CTXSYS')
+        ORDER BY OWNER
         """
         return self.execute_safe_query(sql)
 
@@ -295,7 +321,7 @@ class DamengDatabase:
             allowed_schemas = self._get_allowed_schemas_display()
             raise ValueError(f"不允许访问模式: {schema}，允许的模式: {allowed_schemas}")
         
-        # 达梦数据库查询表结构的SQL
+        # 达梦数据库查询表结构的SQL，联接列注释
         sql = """
         SELECT 
             c.COLUMN_NAME as column_name,
@@ -310,8 +336,12 @@ class DamengDatabase:
                 WHEN pk.COLUMN_NAME IS NOT NULL THEN 'YES'
                 ELSE 'NO'
             END as is_primary_key,
-            c.COMMENTS as column_comment
+            com.COMMENTS as column_comment
         FROM ALL_TAB_COLUMNS c
+        LEFT JOIN DBA_COL_COMMENTS com 
+            ON com.OWNER = c.OWNER 
+            AND com.TABLE_NAME = c.TABLE_NAME 
+            AND com.COLUMN_NAME = c.COLUMN_NAME
         LEFT JOIN (
             SELECT cc.COLUMN_NAME
             FROM ALL_CONSTRAINTS cons
@@ -325,6 +355,24 @@ class DamengDatabase:
         ORDER BY c.COLUMN_ID
         """
         return self.execute_safe_query(sql, (table_name, schema, table_name, schema))
+
+    def get_table_comment(self, table_name: str, schema: str = 'SYSDBA') -> str:
+        """获取表的注释（优先从 ALL_TAB_COMMENTS 读取）"""
+        if not self._is_schema_allowed(schema):
+            allowed_schemas = self._get_allowed_schemas_display()
+            raise ValueError(f"不允许访问模式: {schema}，允许的模式: {allowed_schemas}")
+        try:
+            sql = """
+            SELECT COMMENTS
+            FROM ALL_TAB_COMMENTS
+            WHERE OWNER = ? AND TABLE_NAME = ?
+            """
+            result = self.execute_safe_query(sql, (schema, table_name))
+            if result and (result[0].get('COMMENTS') or result[0].get('comments')):
+                return result[0].get('COMMENTS') or result[0].get('comments')
+            return ""
+        except Exception:
+            return ""
     
     def get_table_indexes(self, table_name: str, schema: str = 'SYSDBA') -> List[Dict[str, Any]]:
         """获取表索引信息（适配达梦数据库）"""
@@ -382,10 +430,132 @@ class DamengDatabase:
         """测试数据库连接"""
         try:
             result = self.execute_safe_query("SELECT 1 as test_connection FROM DUAL")
-            return len(result) > 0 and result[0]['test_connection'] == 1
+            if len(result) > 0:
+                # 达梦数据库字段名可能是大写，尝试两种格式
+                first_row = result[0]
+                test_value = first_row.get('test_connection') or first_row.get('TEST_CONNECTION')
+                return test_value == 1
+            return False
         except Exception as e:
             logger.error(f"连接测试失败: {e}")
             return False
+    
+    def get_table_statistics(self, table_name: str, schema: str = 'SYSDBA') -> Dict[str, Any]:
+        """获取表的统计信息"""
+        if not self._is_schema_allowed(schema):
+            allowed_schemas = self._get_allowed_schemas_display()
+            raise ValueError(f"不允许访问模式: {schema}，允许的模式: {allowed_schemas}")
+        
+        try:
+            # 获取表基本信息
+            table_info_sql = """
+            SELECT 
+                TABLE_NAME,
+                TABLESPACE_NAME,
+                STATUS,
+                LAST_ANALYZED
+            FROM ALL_TABLES 
+            WHERE TABLE_NAME = ? AND OWNER = ?
+            """
+            table_info = self.execute_safe_query(table_info_sql, (table_name, schema))
+            
+            if not table_info:
+                return {}
+            
+            table_info = table_info[0]
+            
+            # 获取表的行数
+            try:
+                row_count_sql = f"SELECT COUNT(*) as row_count FROM {schema}.{table_name}"
+                row_count_result = self.execute_safe_query(row_count_sql)
+                row_count = row_count_result[0].get('row_count') or row_count_result[0].get('ROW_COUNT', 0)
+            except Exception as e:
+                logger.warning(f"获取表行数失败: {e}")
+                row_count = 0
+            
+            # 获取字段数量
+            try:
+                column_count_sql = """
+                SELECT COUNT(*) as column_count
+                FROM ALL_TAB_COLUMNS 
+                WHERE TABLE_NAME = ? AND OWNER = ?
+                """
+                column_count_result = self.execute_safe_query(column_count_sql, (table_name, schema))
+                column_count = column_count_result[0].get('column_count') or column_count_result[0].get('COLUMN_COUNT', 0)
+            except Exception as e:
+                logger.warning(f"获取字段数量失败: {e}")
+                column_count = 0
+            
+            # 获取索引数量
+            try:
+                index_count_sql = """
+                SELECT COUNT(*) as index_count
+                FROM ALL_INDEXES 
+                WHERE TABLE_NAME = ? AND OWNER = ?
+                """
+                index_count_result = self.execute_safe_query(index_count_sql, (table_name, schema))
+                index_count = index_count_result[0].get('index_count') or index_count_result[0].get('INDEX_COUNT', 0)
+            except Exception as e:
+                logger.warning(f"获取索引数量失败: {e}")
+                index_count = 0
+            
+            # 获取约束数量
+            try:
+                constraint_count_sql = """
+                SELECT COUNT(*) as constraint_count
+                FROM ALL_CONSTRAINTS 
+                WHERE TABLE_NAME = ? AND OWNER = ?
+                """
+                constraint_count_result = self.execute_safe_query(constraint_count_sql, (table_name, schema))
+                constraint_count = constraint_count_result[0].get('constraint_count') or constraint_count_result[0].get('CONSTRAINT_COUNT', 0)
+            except Exception as e:
+                logger.warning(f"获取约束数量失败: {e}")
+                constraint_count = 0
+            
+            # 获取表的大小信息（如果可用）
+            try:
+                # 尝试从系统统计表获取大小信息
+                size_info_sql = """
+                SELECT 
+                    TOTAL_ROWS,
+                    LAST_STAT_DT
+                FROM SYS.SYSSTATTABLEIDU s
+                INNER JOIN ALL_TABLES t ON s.ID = t.TABLE_ID
+                WHERE t.TABLE_NAME = ? AND t.OWNER = ?
+                """
+                size_info_result = self.execute_safe_query(size_info_sql, (table_name, schema))
+                if size_info_result:
+                    size_info = size_info_result[0]
+                    total_rows_from_stats = size_info.get('TOTAL_ROWS') or size_info.get('total_rows')
+                    last_stat_date = size_info.get('LAST_STAT_DT') or size_info.get('last_stat_dt')
+                else:
+                    total_rows_from_stats = None
+                    last_stat_date = None
+            except Exception as e:
+                logger.warning(f"获取表大小信息失败: {e}")
+                total_rows_from_stats = None
+                last_stat_date = None
+            
+            # 组装统计信息
+            statistics = {
+                "table_name": table_name,
+                "schema": schema,
+                "row_count": row_count,
+                "column_count": column_count,
+                "index_count": index_count,
+                "constraint_count": constraint_count,
+                "tablespace_name": table_info.get('TABLESPACE_NAME') or table_info.get('tablespace_name'),
+                "status": table_info.get('STATUS') or table_info.get('status'),
+                "last_analyzed": table_info.get('LAST_ANALYZED') or table_info.get('last_analyzed'),
+                "total_rows_from_stats": total_rows_from_stats,
+                "last_stat_date": last_stat_date
+            }
+            
+            return statistics
+            
+        except Exception as e:
+            logger.error(f"获取表统计信息失败: {e}")
+            return {}
     
     def get_security_info(self) -> Dict[str, Any]:
         """获取当前安全配置信息"""

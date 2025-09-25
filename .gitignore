@@ -183,3 +183,11 @@ dm_logs/
 *.dmp
 *.ctl
 *.arc 
+database.py
+student/00-core-rules.md
+student/01-frontend-rules.md
+student/02-backend-rules.md
+student/4
+student/5
+student/6
+student/GZW2.0表二多年度表创建.md
