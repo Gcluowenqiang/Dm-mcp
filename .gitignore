@@ -97,19 +97,7 @@ config.local.py
 
 # 用户生成的文档（运行时生成）
 # ------------------------------------------------
-docs/*_20*.md
-docs/*_20*.json
-docs/*_20*.sql
-docs/SYSDBA_*.md
-docs/TEST_*.md
-docs/USER_*.md
-docs/*数据库概览*.md
-
-# 但保留示例和说明文档
-!docs/README.md
-!docs/*说明*.md
-!docs/*示例*.md
-!docs/*规划*.md
+docs/
 
 # 修复记录文件（这些是开发过程产生的）
 # ------------------------------------------------
@@ -183,11 +171,4 @@ dm_logs/
 *.dmp
 *.ctl
 *.arc 
-database.py
-student/00-core-rules.md
-student/01-frontend-rules.md
-student/02-backend-rules.md
-student/4
-student/5
-student/6
-student/GZW2.0表二多年度表创建.md
+student/

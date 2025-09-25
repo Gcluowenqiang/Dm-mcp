@@ -22,25 +22,33 @@ class SecurityMode(str, Enum):
 class DamengConfig(BaseModel):
     """达梦数据库配置"""
     
+    # 常量定义
+    DEFAULT_DATABASE: str = "DAMENG"
+    DEFAULT_CONNECT_TIMEOUT: int = 30
+    DEFAULT_QUERY_TIMEOUT: int = 60
+    DEFAULT_MAX_RETRIES: int = 3
+    DEFAULT_ALLOWED_SCHEMAS: List[str] = ["*"]
+    DEFAULT_MAX_RESULT_ROWS: int = 1000
+    
     # 数据库连接参数 - 必须从环境变量获取，无默认值
     host: str = Field(..., description="数据库主机地址")
     port: int = Field(..., description="数据库端口")
     username: str = Field(..., description="数据库用户名")
     password: str = Field(..., description="数据库密码")
-    database: str = Field("DAMENG", description="数据库实例名，默认为DAMENG，支持动态配置")
+    database: str = Field(DEFAULT_DATABASE, description="数据库实例名，默认为DAMENG，支持动态配置")
     
     # 连接控制参数
-    connect_timeout: int = Field(30, description="连接超时时间（秒）")
-    query_timeout: int = Field(60, description="查询超时时间（秒）")
-    max_retries: int = Field(3, description="最大重试次数")
+    connect_timeout: int = Field(DEFAULT_CONNECT_TIMEOUT, description="连接超时时间（秒）")
+    query_timeout: int = Field(DEFAULT_QUERY_TIMEOUT, description="查询超时时间（秒）")
+    max_retries: int = Field(DEFAULT_MAX_RETRIES, description="最大重试次数")
     
     # 安全控制 - 默认最严格的只读模式
     security_mode: SecurityMode = Field(SecurityMode.READONLY, description="安全模式")
-    allowed_schemas: List[str] = Field(["*"], description="允许访问的模式列表，支持'*'表示所有模式，'auto'表示自动发现")
+    allowed_schemas: List[str] = Field(DEFAULT_ALLOWED_SCHEMAS, description="允许访问的模式列表，支持'*'表示所有模式，'auto'表示自动发现")
     
     # 高级配置
     enable_query_log: bool = Field(False, description="是否启用查询日志")
-    max_result_rows: int = Field(1000, description="最大返回行数")
+    max_result_rows: int = Field(DEFAULT_MAX_RESULT_ROWS, description="最大返回行数")
     
     @validator('security_mode', pre=True)
     def validate_security_mode(cls, v):

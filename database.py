@@ -11,11 +11,99 @@ from typing import List, Dict, Any, Optional, Set
 import logging
 from contextlib import contextmanager
 from decimal import Decimal
+import time
+import hashlib
 from config import get_config_instance, SecurityMode
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+class QueryCache:
+    """查询缓存管理器"""
+    
+    def __init__(self, max_size: int = 100, ttl: int = 300):
+        """
+        初始化查询缓存
+        
+        Args:
+            max_size: 最大缓存条目数
+            ttl: 缓存生存时间（秒）
+        """
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.max_size = max_size
+        self.ttl = ttl
+        self.access_times: Dict[str, float] = {}
+    
+    def _generate_key(self, sql: str, schema: str = None) -> str:
+        """生成缓存键"""
+        key_data = f"{sql}_{schema or ''}"
+        return hashlib.md5(key_data.encode('utf-8')).hexdigest()
+    
+    def get(self, sql: str, schema: str = None) -> Optional[List[Dict[str, Any]]]:
+        """获取缓存结果"""
+        key = self._generate_key(sql, schema)
+        
+        if key not in self.cache:
+            return None
+        
+        # 检查是否过期
+        if time.time() - self.cache[key]['timestamp'] > self.ttl:
+            self._remove(key)
+            return None
+        
+        # 更新访问时间
+        self.access_times[key] = time.time()
+        logger.debug(f"缓存命中: {sql[:50]}...")
+        return self.cache[key]['data']
+    
+    def set(self, sql: str, data: List[Dict[str, Any]], schema: str = None):
+        """设置缓存结果"""
+        key = self._generate_key(sql, schema)
+        
+        # 如果缓存已满，删除最旧的条目
+        if len(self.cache) >= self.max_size:
+            self._evict_oldest()
+        
+        self.cache[key] = {
+            'data': data,
+            'timestamp': time.time(),
+            'sql': sql,
+            'schema': schema
+        }
+        self.access_times[key] = time.time()
+        logger.debug(f"缓存设置: {sql[:50]}...")
+    
+    def _remove(self, key: str):
+        """删除缓存条目"""
+        if key in self.cache:
+            del self.cache[key]
+        if key in self.access_times:
+            del self.access_times[key]
+    
+    def _evict_oldest(self):
+        """删除最旧的缓存条目"""
+        if not self.access_times:
+            return
+        
+        oldest_key = min(self.access_times.keys(), key=lambda k: self.access_times[k])
+        self._remove(oldest_key)
+    
+    def clear(self):
+        """清空缓存"""
+        self.cache.clear()
+        self.access_times.clear()
+        logger.info("查询缓存已清空")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """获取缓存统计信息"""
+        return {
+            'cache_size': len(self.cache),
+            'max_size': self.max_size,
+            'ttl': self.ttl,
+            'entries': list(self.cache.keys())
+        }
 
 
 class SQLValidator:
@@ -132,9 +220,19 @@ class SQLValidator:
 class DamengDatabase:
     """达梦数据库操作类"""
     
+    # 常量定义
+    SYSTEM_USERS = ('SYS', 'SYSTEM', 'SYSAUDITOR', 'CTXSYS')
+    DEFAULT_AUTO_COMMIT = True
+    DEFAULT_SCHEMA = 'SYSDBA'
+    
     def __init__(self):
         self.config = get_config_instance()
         self.sql_validator = SQLValidator()
+        # 初始化查询缓存
+        self.query_cache = QueryCache(
+            max_size=getattr(self.config, 'cache_max_size', 100),
+            ttl=getattr(self.config, 'cache_ttl', 300)
+        )
         logger.info(f"达梦数据库服务初始化完成，安全模式: {self.config.security_mode.value}")
     
     @contextmanager
@@ -147,7 +245,7 @@ class DamengDatabase:
                 password=self.config.password,
                 server=self.config.host,
                 port=self.config.port,
-                autoCommit=True  # 达梦数据库使用自动提交模式避免语法问题
+                autoCommit=self.DEFAULT_AUTO_COMMIT  # 达梦数据库使用自动提交模式避免语法问题
             )
             
             # 达梦数据库连接成功后记录配置的数据库实例信息
@@ -169,12 +267,19 @@ class DamengDatabase:
                 conn.close()
                 logger.info("达梦数据库连接已关闭")
     
-    def execute_query(self, sql: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
+    def execute_query(self, sql: str, params: Optional[tuple] = None, use_cache: bool = True) -> List[Dict[str, Any]]:
         """执行查询语句"""
         # 安全检查：验证SQL是否符合当前安全模式
         if not self.sql_validator.validate_sql(sql, self.config.security_mode):
             error_msg = self.sql_validator.get_error_message(sql, self.config.security_mode)
             raise ValueError(f"SQL操作被安全策略禁止: {error_msg}")
+        
+        # 对于只读查询，尝试从缓存获取
+        if use_cache and sql.upper().strip().startswith(('SELECT', 'WITH', 'SHOW', 'DESCRIBE', 'EXPLAIN')):
+            cached_result = self.query_cache.get(sql)
+            if cached_result is not None:
+                logger.debug(f"从缓存返回查询结果: {sql[:50]}...")
+                return cached_result
         
         # 记录查询日志（如果启用）
         if self.config.enable_query_log:
@@ -230,6 +335,11 @@ class DamengDatabase:
                             result_dicts = result_dicts[:self.config.max_result_rows]
                         
                         logger.info(f"查询执行成功，返回 {len(result_dicts)} 条记录")
+                        
+                        # 将查询结果缓存
+                        if use_cache:
+                            self.query_cache.set(sql, result_dicts)
+                        
                         return result_dicts
                     else:
                         # 对于非查询操作（INSERT、UPDATE等），返回影响的行数（已自动提交）
@@ -249,8 +359,11 @@ class DamengDatabase:
         
         return self.execute_query(sql, params)
     
-    def get_all_tables(self, schema: str = 'SYSDBA') -> List[Dict[str, Any]]:
+    def get_all_tables(self, schema: str = None) -> List[Dict[str, Any]]:
         """获取所有表信息（适配达梦数据库）"""
+        if schema is None:
+            schema = self.DEFAULT_SCHEMA
+            
         # 验证模式是否在允许列表中
         if not self._is_schema_allowed(schema):
             allowed_schemas = self._get_allowed_schemas_display()
@@ -306,22 +419,25 @@ class DamengDatabase:
     
     def get_available_schemas(self) -> List[Dict[str, Any]]:
         """获取用户有权限访问的所有schema（基于表所有者）"""
-        sql = """
+        sql = f"""
         SELECT DISTINCT OWNER as schemaname
         FROM ALL_TABLES 
-        WHERE OWNER NOT IN ('SYS', 'SYSTEM', 'SYSAUDITOR', 'CTXSYS')
+        WHERE OWNER NOT IN {self.SYSTEM_USERS}
         ORDER BY OWNER
         """
         return self.execute_safe_query(sql)
 
-    def get_table_structure(self, table_name: str, schema: str = 'SYSDBA') -> List[Dict[str, Any]]:
+    def get_table_structure(self, table_name: str, schema: str = None) -> List[Dict[str, Any]]:
         """获取表结构信息（适配达梦数据库）"""
+        if schema is None:
+            schema = self.DEFAULT_SCHEMA
+            
         # 验证模式是否在允许列表中
         if not self._is_schema_allowed(schema):
             allowed_schemas = self._get_allowed_schemas_display()
             raise ValueError(f"不允许访问模式: {schema}，允许的模式: {allowed_schemas}")
         
-        # 达梦数据库查询表结构的SQL，联接列注释
+        # 达梦数据库查询表结构的SQL，使用USER_*视图
         sql = """
         SELECT 
             c.COLUMN_NAME as column_name,
@@ -337,45 +453,48 @@ class DamengDatabase:
                 ELSE 'NO'
             END as is_primary_key,
             com.COMMENTS as column_comment
-        FROM ALL_TAB_COLUMNS c
-        LEFT JOIN DBA_COL_COMMENTS com 
-            ON com.OWNER = c.OWNER 
-            AND com.TABLE_NAME = c.TABLE_NAME 
+        FROM USER_TAB_COLUMNS c
+        LEFT JOIN USER_COL_COMMENTS com 
+            ON com.TABLE_NAME = c.TABLE_NAME 
             AND com.COLUMN_NAME = c.COLUMN_NAME
         LEFT JOIN (
             SELECT cc.COLUMN_NAME
-            FROM ALL_CONSTRAINTS cons
-            INNER JOIN ALL_CONS_COLUMNS cc ON cons.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+            FROM USER_CONSTRAINTS cons
+            INNER JOIN USER_CONS_COLUMNS cc ON cons.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
             WHERE cons.CONSTRAINT_TYPE = 'P'
                 AND cons.TABLE_NAME = ?
-                AND cons.OWNER = ?
         ) pk ON c.COLUMN_NAME = pk.COLUMN_NAME
         WHERE c.TABLE_NAME = ?
-            AND c.OWNER = ?
         ORDER BY c.COLUMN_ID
         """
-        return self.execute_safe_query(sql, (table_name, schema, table_name, schema))
+        return self.execute_safe_query(sql, (table_name, table_name))
 
-    def get_table_comment(self, table_name: str, schema: str = 'SYSDBA') -> str:
+    def get_table_comment(self, table_name: str, schema: str = None) -> str:
         """获取表的注释（优先从 ALL_TAB_COMMENTS 读取）"""
+        if schema is None:
+            schema = self.DEFAULT_SCHEMA
+            
         if not self._is_schema_allowed(schema):
             allowed_schemas = self._get_allowed_schemas_display()
             raise ValueError(f"不允许访问模式: {schema}，允许的模式: {allowed_schemas}")
         try:
             sql = """
             SELECT COMMENTS
-            FROM ALL_TAB_COMMENTS
-            WHERE OWNER = ? AND TABLE_NAME = ?
+            FROM USER_TAB_COMMENTS
+            WHERE TABLE_NAME = ?
             """
-            result = self.execute_safe_query(sql, (schema, table_name))
+            result = self.execute_safe_query(sql, (table_name,))
             if result and (result[0].get('COMMENTS') or result[0].get('comments')):
                 return result[0].get('COMMENTS') or result[0].get('comments')
             return ""
         except Exception:
             return ""
     
-    def get_table_indexes(self, table_name: str, schema: str = 'SYSDBA') -> List[Dict[str, Any]]:
+    def get_table_indexes(self, table_name: str, schema: str = None) -> List[Dict[str, Any]]:
         """获取表索引信息（适配达梦数据库）"""
+        if schema is None:
+            schema = self.DEFAULT_SCHEMA
+            
         if not self._is_schema_allowed(schema):
             allowed_schemas = self._get_allowed_schemas_display()
             raise ValueError(f"不允许访问模式: {schema}，允许的模式: {allowed_schemas}")
@@ -386,18 +505,20 @@ class DamengDatabase:
                 INDEX_NAME as indexname,
                 'CREATE INDEX ' || INDEX_NAME || ' ON ' || TABLE_NAME as indexdef,
                 CASE WHEN UNIQUENESS = 'UNIQUE' THEN 'YES' ELSE 'NO' END as is_unique
-            FROM ALL_INDEXES 
-            WHERE TABLE_NAME = ? 
-                AND OWNER = ?
+            FROM USER_INDEXES 
+            WHERE TABLE_NAME = ?
             ORDER BY INDEX_NAME
             """
-            return self.execute_safe_query(sql, (table_name, schema))
+            return self.execute_safe_query(sql, (table_name,))
         except Exception as e:
             logger.warning(f"获取索引信息失败: {e}")
             return []  # 返回空列表而不是抛出异常
     
-    def get_table_constraints(self, table_name: str, schema: str = 'SYSDBA') -> List[Dict[str, Any]]:
+    def get_table_constraints(self, table_name: str, schema: str = None) -> List[Dict[str, Any]]:
         """获取表约束信息（适配达梦数据库）"""
+        if schema is None:
+            schema = self.DEFAULT_SCHEMA
+            
         if not self._is_schema_allowed(schema):
             allowed_schemas = self._get_allowed_schemas_display()
             raise ValueError(f"不允许访问模式: {schema}，允许的模式: {allowed_schemas}")
@@ -413,15 +534,14 @@ class DamengDatabase:
                         ref_cons.OWNER||'.'||ref_cons.TABLE_NAME||'.'||ref_cc.COLUMN_NAME
                     ELSE NULL
                 END as foreign_key_references
-            FROM ALL_CONSTRAINTS cons
-            LEFT JOIN ALL_CONS_COLUMNS cc ON cons.CONSTRAINT_NAME = cc.CONSTRAINT_NAME AND cons.OWNER = cc.OWNER
-            LEFT JOIN ALL_CONSTRAINTS ref_cons ON cons.R_CONSTRAINT_NAME = ref_cons.CONSTRAINT_NAME
-            LEFT JOIN ALL_CONS_COLUMNS ref_cc ON ref_cons.CONSTRAINT_NAME = ref_cc.CONSTRAINT_NAME AND ref_cons.OWNER = ref_cc.OWNER
+            FROM USER_CONSTRAINTS cons
+            LEFT JOIN USER_CONS_COLUMNS cc ON cons.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+            LEFT JOIN USER_CONSTRAINTS ref_cons ON cons.R_CONSTRAINT_NAME = ref_cons.CONSTRAINT_NAME
+            LEFT JOIN USER_CONS_COLUMNS ref_cc ON ref_cons.CONSTRAINT_NAME = ref_cc.CONSTRAINT_NAME
             WHERE cons.TABLE_NAME = ?
-                AND cons.OWNER = ?
             ORDER BY cons.CONSTRAINT_TYPE, cons.CONSTRAINT_NAME
             """
-            return self.execute_safe_query(sql, (table_name, schema))
+            return self.execute_safe_query(sql, (table_name,))
         except Exception as e:
             logger.warning(f"获取约束信息失败: {e}")
             return []  # 返回空列表而不是抛出异常
@@ -440,8 +560,11 @@ class DamengDatabase:
             logger.error(f"连接测试失败: {e}")
             return False
     
-    def get_table_statistics(self, table_name: str, schema: str = 'SYSDBA') -> Dict[str, Any]:
+    def get_table_statistics(self, table_name: str, schema: str = None) -> Dict[str, Any]:
         """获取表的统计信息"""
+        if schema is None:
+            schema = self.DEFAULT_SCHEMA
+            
         if not self._is_schema_allowed(schema):
             allowed_schemas = self._get_allowed_schemas_display()
             raise ValueError(f"不允许访问模式: {schema}，允许的模式: {allowed_schemas}")
@@ -568,6 +691,56 @@ class DamengDatabase:
             "max_result_rows": self.config.max_result_rows,
             "query_log_enabled": self.config.enable_query_log
         }
+    
+    def get_cache_info(self) -> Dict[str, Any]:
+        """获取缓存统计信息"""
+        return self.query_cache.get_stats()
+    
+    def clear_cache(self):
+        """清空查询缓存"""
+        self.query_cache.clear()
+        logger.info("查询缓存已清空")
+    
+    def get_table_relationships(self, schema: str = None) -> List[Dict[str, Any]]:
+        """获取表间关系信息"""
+        if schema is None:
+            schema = self.DEFAULT_SCHEMA
+        
+        # 验证schema访问权限
+        if not self._is_schema_allowed(schema):
+            raise ValueError(f"没有权限访问模式: {schema}")
+        
+        sql = """
+        SELECT 
+            tc.TABLE_NAME as child_table,
+            kcu.COLUMN_NAME as child_column,
+            ccu.TABLE_NAME as parent_table,
+            ccu.COLUMN_NAME as parent_column,
+            tc.CONSTRAINT_NAME as constraint_name,
+            tc.CONSTRAINT_TYPE as constraint_type
+        FROM 
+            USER_CONSTRAINTS tc
+        JOIN 
+            USER_CONS_COLUMNS kcu ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+        JOIN 
+            USER_CONS_COLUMNS ccu ON tc.R_CONSTRAINT_NAME = ccu.CONSTRAINT_NAME
+        WHERE 
+            tc.CONSTRAINT_TYPE = 'R'
+            AND tc.TABLE_NAME IN (
+                SELECT TABLE_NAME FROM USER_TABLES 
+                WHERE TABLE_NAME NOT LIKE 'SYS_%'
+            )
+        ORDER BY 
+            tc.TABLE_NAME, kcu.COLUMN_NAME
+        """
+        
+        try:
+            results = self.execute_query(sql, use_cache=True)
+            logger.info(f"获取到 {len(results)} 个表关系")
+            return results
+        except Exception as e:
+            logger.error(f"获取表关系失败: {e}")
+            return []
 
 
 # 全局数据库实例 - 延迟初始化以避免配置未就绪问题

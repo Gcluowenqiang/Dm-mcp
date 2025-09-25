@@ -155,14 +155,26 @@ print(f"API Level: {dmPython.apilevel}")
 
 ## 可用工具
 
+### 基础功能
 1. **test_connection**: 测试数据库连接
 2. **get_security_info**: 获取当前安全配置信息
 3. **list_schemas**: 获取用户有权限访问的所有数据库模式
 4. **list_tables**: 列出指定模式中的所有表
 5. **describe_table**: 获取表的详细结构信息
-6. **generate_table_doc**: 生成表结构文档并保存到当前工作目录的docs文件夹
-7. **generate_database_overview**: 生成数据库概览文档并保存到当前工作目录的docs文件夹
-8. **execute_query**: 执行 SQL 语句（受安全模式限制）
+6. **execute_query**: 执行 SQL 语句（受安全模式限制）
+
+### 文档生成功能
+7. **generate_table_doc**: 生成表结构文档并保存到当前工作目录的docs文件夹
+8. **generate_database_overview**: 生成数据库概览文档并保存到当前工作目录的docs文件夹
+9. **generate_relationship_doc**: 生成数据库表关系图文档（支持Mermaid格式）
+10. **batch_generate_table_docs**: 批量生成多个表的文档
+
+### 导出功能
+11. **export_to_excel**: 导出表结构或数据为Excel格式
+
+### 缓存管理功能
+12. **get_cache_info**: 获取查询缓存统计信息
+13. **clear_cache**: 清空查询缓存
 
 ## 使用示例
 
@@ -207,13 +219,34 @@ print(f"API Level: {dmPython.apilevel}")
 @dm-mcp 生成SYSDBA模式的数据库概览文档
 ```
 
+### 生成表关系图
+```
+@dm-mcp 生成PB模式的表关系图文档
+```
+
+### 批量生成表文档
+```
+@dm-mcp 批量生成T_USER、T_ROLE、T_PERMISSION表的Markdown文档
+```
+
+### 导出Excel文件
+```
+@dm-mcp 导出T_USER表的结构和数据到Excel文件
+```
+
+### 缓存管理
+```
+@dm-mcp 获取查询缓存统计信息
+@dm-mcp 清空查询缓存
+```
+
 ## 文档生成说明
 
 文档生成功能会将生成的文档保存为实际文件：
 
 - **保存位置**: 当前工作目录下的 `docs/` 文件夹
 - **文件命名**: `{schema}_{table_name}_{timestamp}.{ext}` 格式
-- **支持格式**: Markdown (.md)、JSON (.json)、SQL (.sql)
+- **支持格式**: Markdown (.md)、JSON (.json)、SQL (.sql)、Excel (.xlsx)
 - **多用户友好**: 每个用户在自己的项目目录下都会生成独立的docs文件夹
 
 **示例输出**:
@@ -384,7 +417,7 @@ print(f"API Level: {dmPython.apilevel}")
 
 ---
 
-**版本**: 1.0.0  
-**更新时间**: 2025-06-20  
+**版本**: 2.0.0  
+**更新时间**: 2025-09-24  
 **设计目标**: 专为达梦数据库和 Cursor MCP 集成优化  
 **基于项目**: kingbase-mcp 

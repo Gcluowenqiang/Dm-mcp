@@ -2,12 +2,12 @@
   "mcpServers": {
     "dm-mcp": {
       "command": "python",
-      "args": ["D:/cursorMcp/dm-mcp/main.py"],
+      "args": ["/path/to/dm-mcp/main.py"],
       "env": {
-        "DAMENG_HOST": "localhost",
+        "DAMENG_HOST": "your_dm_server_host",
         "DAMENG_PORT": "5236",
-        "DAMENG_USERNAME": "SYSDBA",
-        "DAMENG_PASSWORD": "SYSDBA",
+        "DAMENG_USERNAME": "your_username",
+        "DAMENG_PASSWORD": "your_password",
         "DAMENG_DATABASE": "DAMENG",
         "DAMENG_SECURITY_MODE": "readonly",
         "DAMENG_ALLOWED_SCHEMAS": "*",
