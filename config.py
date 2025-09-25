@@ -27,7 +27,7 @@ class DamengConfig(BaseModel):
     port: int = Field(..., description="数据库端口")
     username: str = Field(..., description="数据库用户名")
     password: str = Field(..., description="数据库密码")
-    # 注意：达梦数据库连接不需要database参数，通过schema区分数据空间
+    database: str = Field("DAMENG", description="数据库实例名，默认为DAMENG，支持动态配置")
     
     # 连接控制参数
     connect_timeout: int = Field(30, description="连接超时时间（秒）")
@@ -63,7 +63,7 @@ class DamengConfig(BaseModel):
         """获取数据库连接字符串（达梦数据库格式）"""
         return (
             f"dm://{self.username}:{self.password}@"
-            f"{self.host}:{self.port}"
+            f"{self.host}:{self.port}/{self.database}"
             f"?appName=dm-mcp-{self.security_mode.value}"
         )
     
@@ -100,7 +100,6 @@ class DamengConfig(BaseModel):
             "DAMENG_PORT": "port", 
             "DAMENG_USERNAME": "username",
             "DAMENG_PASSWORD": "password"
-            # 注意：达梦数据库不需要database参数
         }
         
         config_data = {}
@@ -121,6 +120,7 @@ class DamengConfig(BaseModel):
         
         # 可选的环境变量
         optional_env_vars = {
+            "DAMENG_DATABASE": ("database", str),
             "DAMENG_CONNECT_TIMEOUT": ("connect_timeout", int),
             "DAMENG_QUERY_TIMEOUT": ("query_timeout", int),
             "DAMENG_MAX_RETRIES": ("max_retries", int),

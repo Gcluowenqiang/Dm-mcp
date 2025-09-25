@@ -146,6 +146,7 @@ class DamengDatabase:
                 password=self.config.password,
                 server=self.config.host,
                 port=self.config.port,
+                database=self.config.database,
                 autoCommit=False
             )
             
