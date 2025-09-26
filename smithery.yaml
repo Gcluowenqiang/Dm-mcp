@@ -1,0 +1,78 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+startCommand:
+  type: stdio
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config)=>{ const env = { DAMENG_HOST: config.damengHost, DAMENG_PORT: String(config.damengPort), DAMENG_USERNAME: config.damengUsername, DAMENG_PASSWORD: config.damengPassword }; if(config.damengDatabase) env.DAMENG_DATABASE = config.damengDatabase; if(config.connectTimeout !== undefined) env.DAMENG_CONNECT_TIMEOUT = String(config.connectTimeout); if(config.queryTimeout !== undefined) env.DAMENG_QUERY_TIMEOUT = String(config.queryTimeout); if(config.maxRetries !== undefined) env.DAMENG_MAX_RETRIES = String(config.maxRetries); if(config.securityMode) env.DAMENG_SECURITY_MODE = config.securityMode; if(config.allowedSchemas) env.DAMENG_ALLOWED_SCHEMAS = config.allowedSchemas.join(","); if(config.enableQueryLog !== undefined) env.DAMENG_ENABLE_QUERY_LOG = config.enableQueryLog.toString(); if(config.maxResultRows !== undefined) env.DAMENG_MAX_RESULT_ROWS = String(config.maxResultRows); return { command: "python", args: ["main.py"], env }; }
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - damengHost
+      - damengPort
+      - damengUsername
+      - damengPassword
+    properties:
+      damengHost:
+        type: string
+        description: 达梦数据库服务器地址
+      damengPort:
+        type: number
+        description: 达梦数据库端口
+      damengUsername:
+        type: string
+        description: 数据库用户名
+      damengPassword:
+        type: string
+        description: 数据库密码
+      damengDatabase:
+        type: string
+        default: DAMENG
+        description: 数据库实例名
+      connectTimeout:
+        type: number
+        default: 30
+        description: 连接超时时间（秒）
+      queryTimeout:
+        type: number
+        default: 60
+        description: 查询超时时间（秒）
+      maxRetries:
+        type: number
+        default: 3
+        description: 最大重试次数
+      securityMode:
+        type: string
+        default: readonly
+        description: 安全模式
+      allowedSchemas:
+        type: array
+        items:
+          type: string
+        default:
+          - "*"
+        description: 允许访问的模式列表
+      enableQueryLog:
+        type: boolean
+        default: false
+        description: 是否启用查询日志
+      maxResultRows:
+        type: number
+        default: 1000
+        description: 最大返回行数
+  exampleConfig:
+    damengHost: dm.example.com
+    damengPort: 5236
+    damengUsername: test_user
+    damengPassword: s3cr3t
+    damengDatabase: TESTDB
+    connectTimeout: 30
+    queryTimeout: 60
+    maxRetries: 3
+    securityMode: readonly
+    allowedSchemas:
+      - "*"
+    enableQueryLog: false
+    maxResultRows: 1000
